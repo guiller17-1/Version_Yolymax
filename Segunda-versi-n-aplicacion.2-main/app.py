@@ -84,27 +84,14 @@ CRON_SECRET = os.getenv(
 # =========================================================
 
 def ahora_utc():
-    """
-    Devuelve la fecha y hora actual en UTC
-    incluyendo la información de zona horaria.
-    """
     return datetime.now(UTC)
 
 
 def ahora_lima():
-    """
-    Devuelve la fecha y hora actual de Perú.
-    """
     return datetime.now(LIMA)
 
 
 def asegurar_utc(fecha):
-    """
-    Convierte una fecha a UTC.
-
-    Las fechas antiguas que no tienen zona horaria
-    se interpretan como UTC.
-    """
     if fecha is None:
         return None
 
@@ -115,9 +102,6 @@ def asegurar_utc(fecha):
 
 
 def convertir_a_hora_peru(fecha):
-    """
-    Convierte una fecha UTC a la hora de Perú.
-    """
     fecha_utc = asegurar_utc(fecha)
 
     if fecha_utc is None:
@@ -128,11 +112,6 @@ def convertir_a_hora_peru(fecha):
 
 @app.template_filter("hora_peru")
 def filtro_hora_peru(fecha):
-    """
-    Ejemplo en HTML:
-
-    {{ order.created_at | hora_peru }}
-    """
     fecha_peru = convertir_a_hora_peru(fecha)
 
     if fecha_peru is None:
@@ -343,137 +322,123 @@ def parse_excel(content):
 # =========================================================
 
 def load_fallback():
-    path = Path(
-        app.root_path,
-        "inventory.json"
-    )
+    file_path = Path("inventory.json")
 
-    if not path.exists():
+    if not file_path.exists():
         return []
 
-    raw = json.loads(
-        path.read_text(
+    try:
+        with file_path.open(
+            "r",
             encoding="utf-8"
-        )
-    )
+        ) as f:
+            data = json.load(f)
 
-    result = []
+        items = []
 
-    for item in raw:
-        imagenes = item.get(
-            "imagenes",
-            []
-        )
+        for row in data:
+            marca = str(
+                row.get("marca", "")
+            ).strip()
 
-        if not isinstance(imagenes, list):
-            imagenes = []
+            producto = str(
+                row.get("producto", "")
+            ).strip()
 
-        try:
-            precio = Decimal(
-                str(
-                    item.get("precio", 0) or 0
+            if not marca or not producto:
+                continue
+
+            try:
+                precio = Decimal(
+                    str(
+                        row.get("precio", 0)
+                    )
                 )
-            )
-        except Exception:
-            precio = Decimal("0")
+            except Exception:
+                precio = Decimal("0")
 
-        result.append({
-            "marca": str(
-                item.get("marca", "")
-            ).strip(),
-            "producto": str(
-                item.get("producto", "")
-            ).strip(),
-            "precio": precio,
-            "stock": entero_stock(
-                item.get("stock", 0)
-            ),
-            "imagenes": imagenes,
-        })
+            imagenes = [
+                str(img).strip()
+                for img in row.get("imagenes", [])
+                if str(img).strip()
+            ]
 
-    return result
+            items.append({
+                "marca": marca,
+                "producto": producto,
+                "precio": precio,
+                "stock": entero_stock(
+                    row.get("stock", 0)
+                ),
+                "imagenes": imagenes,
+            })
+
+        return items
+
+    except Exception:
+        return []
 
 
 # =========================================================
-# CAPTURAS DIARIAS DEL STOCK
+# LÓGICA DE SNAPSHOTS
 # =========================================================
 
 def snapshot_date_in_use():
-    today = ahora_lima().date()
+    now_lima = ahora_lima()
 
-    today_exists = (
-        db.session.query(StockSnapshot.id)
-        .filter_by(snapshot_date=today)
-        .first()
-    )
+    if now_lima.time() < dt_time(6, 0):
+        used_dt = now_lima.date()
+        from datetime import timedelta
+        return used_dt - timedelta(days=1)
 
-    if today_exists:
-        return today
-
-    return db.session.query(
-        func.max(
-            StockSnapshot.snapshot_date
-        )
-    ).scalar()
+    return now_lima.date()
 
 
 def create_daily_snapshot(force=False):
-    today = ahora_lima().date()
+    target_date = snapshot_date_in_use()
 
-    exists = (
-        db.session.query(StockSnapshot.id)
-        .filter_by(snapshot_date=today)
-        .first()
-    )
+    existing = StockSnapshot.query.filter_by(
+        snapshot_date=target_date
+    ).first()
 
-    if exists and not force:
+    if existing and not force:
         return {
-            "created": False,
-            "date": today.isoformat(),
-            "message": (
-                "La captura de hoy ya existe"
-            )
+            "creado": False,
+            "motivo": "Ya existe foto para hoy",
+            "fecha": target_date.isoformat(),
         }
 
+    items = []
+
     try:
-        items = parse_excel(
-            download_onedrive()
+        content = download_onedrive()
+        items = parse_excel(content)
+    except Exception as exc:
+        app.logger.warning(
+            "Error obteniendo Excel de OneDrive: %s",
+            exc
         )
-
-        source = "OneDrive"
-
-    except Exception as error:
-        app.logger.exception(
-            "Fallo al descargar el inventario: %s",
-            error
-        )
-
-        if exists:
-            raise
-
         items = load_fallback()
-        source = "respaldo"
 
     if not items:
-        raise RuntimeError(
-            "No hay productos para crear "
-            "la captura diaria"
-        )
+        return {
+            "creado": False,
+            "motivo": "No se obtuvieron productos",
+            "fecha": target_date.isoformat(),
+        }
 
-    if force:
+    if existing and force:
         StockSnapshot.query.filter_by(
-            snapshot_date=today
-        ).delete(
-            synchronize_session=False
-        )
+            snapshot_date=target_date
+        ).delete()
 
-    captured_at_utc = ahora_utc()
+    new_objects = []
 
     for item in items:
-        db.session.add(
+        new_objects.append(
             StockSnapshot(
-                snapshot_date=today,
-                captured_at=captured_at_utc,
+                snapshot_date=target_date,
+                captured_at=ahora_utc(),
                 marca=item["marca"],
                 producto=item["producto"],
                 precio=item["precio"],
@@ -485,42 +450,26 @@ def create_daily_snapshot(force=False):
             )
         )
 
+    db.session.add_all(new_objects)
     db.session.commit()
 
     return {
-        "created": True,
-        "date": today.isoformat(),
-        "hora_peru": ahora_lima().strftime(
-            "%d/%m/%Y %I:%M:%S %p"
-        ),
-        "source": source,
-        "products": len(items)
+        "creado": True,
+        "registros": len(new_objects),
+        "fecha": target_date.isoformat(),
     }
 
 
 def ensure_snapshot():
-    current_date = snapshot_date_in_use()
-    now_peru = ahora_lima()
+    target_date = snapshot_date_in_use()
 
-    if current_date is None:
-        return create_daily_snapshot(
-            force=False
-        )
+    count = StockSnapshot.query.filter_by(
+        snapshot_date=target_date
+    ).count()
 
-    if (
-        current_date < now_peru.date()
-        and now_peru.time() >= dt_time(6, 0)
-    ):
-        return create_daily_snapshot(
-            force=False
-        )
+    if count == 0:
+        create_daily_snapshot(force=False)
 
-    return None
-
-
-# =========================================================
-# RESERVAS Y STOCK DISPONIBLE
-# =========================================================
 
 def obtener_primera_captura(date_used):
     if date_used is None:
@@ -528,13 +477,10 @@ def obtener_primera_captura(date_used):
 
     return (
         db.session.query(
-            func.min(
-                StockSnapshot.captured_at
-            )
+            func.min(StockSnapshot.captured_at)
         )
         .filter(
-            StockSnapshot.snapshot_date
-            == date_used
+            StockSnapshot.snapshot_date == date_used
         )
         .scalar()
     )
@@ -542,43 +488,22 @@ def obtener_primera_captura(date_used):
 
 def reserved_quantities():
     date_used = snapshot_date_in_use()
+    captured_at_start = obtener_primera_captura(date_used)
 
-    if date_used is None:
-        return {}
+    if captured_at_start is None:
+        captured_at_start = ahora_utc()
 
-    first_capture = obtener_primera_captura(
-        date_used
-    )
-
-    query = (
+    rows = (
         db.session.query(
             OrderLine.marca,
             OrderLine.producto,
             func.sum(OrderLine.quantity)
         )
         .join(Order)
-    )
-
-    if first_capture is not None:
-        query = query.filter(
-            (Order.status == "Pendiente")
-            |
-            (
-                (Order.status == "Confirmado")
-                &
-                (
-                    Order.created_at
-                    >= first_capture
-                )
-            )
-        )
-    else:
-        query = query.filter(
+        .filter(
+            Order.created_at >= captured_at_start,
             Order.status == "Pendiente"
         )
-
-    rows = (
-        query
         .group_by(
             OrderLine.marca,
             OrderLine.producto
@@ -586,138 +511,96 @@ def reserved_quantities():
         .all()
     )
 
-    return {
-        (
+    result = {}
+
+    for marca, producto, qty in rows:
+        key = (
             normalizar(marca),
             normalizar(producto)
-        ): int(quantity or 0)
-        for marca, producto, quantity in rows
-    }
+        )
+        result[key] = int(qty or 0)
+
+    return result
 
 
 def catalog_items():
     ensure_snapshot()
-
     date_used = snapshot_date_in_use()
-
-    if date_used is None:
-        return [], None
-
-    reservations = reserved_quantities()
 
     snapshots = (
         StockSnapshot.query
         .filter_by(snapshot_date=date_used)
         .order_by(
-            StockSnapshot.marca,
-            StockSnapshot.producto
+            StockSnapshot.marca.asc(),
+            StockSnapshot.producto.asc()
         )
         .all()
     )
 
-    items = []
+    reservas = reserved_quantities()
+    catalog = []
 
     for item in snapshots:
-        reserved = reservations.get(
-            (
-                normalizar(item.marca),
-                normalizar(item.producto)
-            ),
-            0
+        key = (
+            normalizar(item.marca),
+            normalizar(item.producto)
         )
 
-        available = max(
+        cant_reservada = reservas.get(key, 0)
+        stock_disp = max(
             0,
-            item.stock - reserved
+            item.stock - cant_reservada
         )
 
         try:
             imagenes = json.loads(
                 item.imagenes_json or "[]"
             )
-        except (TypeError, json.JSONDecodeError):
+        except Exception:
             imagenes = []
 
-        items.append({
+        catalog.append({
             "marca": item.marca,
             "producto": item.producto,
             "precio": float(item.precio),
+            "stock": stock_disp,
+            "estado": estado(stock_disp),
             "imagenes": imagenes,
-            "estado": estado(available),
         })
 
-    return items, date_used
+    return catalog
 
 
 def find_snapshot(marca, producto):
     date_used = snapshot_date_in_use()
 
-    if date_used is None:
-        return None
-
     return StockSnapshot.query.filter(
-        StockSnapshot.snapshot_date
-        == date_used,
-        func.lower(
-            StockSnapshot.marca
-        ) == str(marca or "").strip().lower(),
-        func.lower(
-            StockSnapshot.producto
-        ) == str(producto or "").strip().lower(),
+        StockSnapshot.snapshot_date == date_used,
+        func.lower(StockSnapshot.marca) == normalizar(marca),
+        func.lower(StockSnapshot.producto) == normalizar(producto)
     ).first()
 
 
 def available_stock(snapshot):
-    first_capture = obtener_primera_captura(
-        snapshot.snapshot_date
+    if not snapshot:
+        return 0
+
+    reservas = reserved_quantities()
+    key = (
+        normalizar(snapshot.marca),
+        normalizar(snapshot.producto)
     )
 
-    query = (
-        db.session.query(
-            func.coalesce(
-                func.sum(OrderLine.quantity),
-                0
-            )
-        )
-        .join(Order)
-        .filter(
-            func.lower(
-                OrderLine.marca
-            ) == snapshot.marca.lower(),
-            func.lower(
-                OrderLine.producto
-            ) == snapshot.producto.lower(),
-        )
-    )
-
-    if first_capture is not None:
-        query = query.filter(
-            (Order.status == "Pendiente")
-            |
-            (
-                (Order.status == "Confirmado")
-                &
-                (
-                    Order.created_at
-                    >= first_capture
-                )
-            )
-        )
-    else:
-        query = query.filter(
-            Order.status == "Pendiente"
-        )
-
-    reserved = query.scalar()
+    cant_reservada = reservas.get(key, 0)
 
     return max(
         0,
-        snapshot.stock - int(reserved or 0)
+        snapshot.stock - cant_reservada
     )
 
 
 # =========================================================
-# PROTECCIÓN DEL PANEL ADMINISTRATIVO
+# AUTENTICACIÓN ADMIN
 # =========================================================
 
 def admin_required(view):
@@ -725,28 +608,20 @@ def admin_required(view):
     def wrapped(*args, **kwargs):
         if not session.get("admin"):
             return redirect(
-                url_for(
-                    "admin_login",
-                    next=request.path
-                )
+                url_for("admin_login")
             )
-
         return view(*args, **kwargs)
 
     return wrapped
 
 
-# =========================================================
-# INICIALIZACIÓN DE LA BASE
-# =========================================================
-
-@app.before_request
 def initialize_database():
-    db.create_all()
+    with app.app_context():
+        db.create_all()
 
 
 # =========================================================
-# CATÁLOGO
+# RUTAS PÚBLICAS
 # =========================================================
 
 @app.get("/")
@@ -756,247 +631,136 @@ def home():
 
 @app.get("/api/productos")
 def productos():
-    items, date_used = catalog_items()
+    return jsonify(catalog_items())
 
-    return jsonify({
-        "productos": items,
-        "fecha_stock": (
-            date_used.isoformat()
-            if date_used
-            else None
-        ),
-        "hora_peru": ahora_lima().strftime(
-            "%d/%m/%Y %I:%M:%S %p"
-        ),
-    })
-
-
-# =========================================================
-# VERIFICACIÓN DE DISPONIBILIDAD
-# =========================================================
 
 @app.post("/api/verificar-disponibilidad")
 def verificar_disponibilidad():
-    data = request.get_json(
-        silent=True
-    ) or {}
+    data = request.get_json(silent=True) or {}
+    items = data.get("items", [])
 
-    try:
-        quantity = int(
-            data.get("cantidad", 0)
-        )
-
-        in_cart = int(
-            data.get(
-                "cantidad_en_cesta",
-                0
-            )
-        )
-
-    except (TypeError, ValueError):
-        quantity = 0
-        in_cart = 0
-
-    if quantity < 1 or quantity > 99:
+    if not items:
         return jsonify({
-            "disponible": False,
-            "mensaje": (
-                "Selecciona una cantidad válida."
-            )
+            "valido": False,
+            "mensaje": "Carrito vacío"
         }), 400
 
     ensure_snapshot()
 
-    snapshot = find_snapshot(
-        data.get("marca"),
-        data.get("producto")
-    )
+    for item in items:
+        marca = str(item.get("marca", "")).strip()
+        producto = str(item.get("producto", "")).strip()
+        cant = entero_stock(item.get("cantidad", 1))
 
-    if snapshot is None:
-        return jsonify({
-            "disponible": False,
-            "mensaje": "Producto no encontrado."
-        }), 404
+        snap = find_snapshot(marca, producto)
 
-    requested_total = (
-        quantity + max(0, in_cart)
-    )
+        if not snap:
+            return jsonify({
+                "valido": False,
+                "mensaje": f"El producto {marca} - {producto} ya no existe"
+            }), 400
 
-    if requested_total > available_stock(snapshot):
-        return jsonify({
-            "disponible": False,
-            "mensaje": (
-                "No hay disponibilidad suficiente. "
-                "Prueba con una cantidad menor."
-            ),
-        })
+        disp = available_stock(snap)
 
-    return jsonify({
-        "disponible": True,
-        "mensaje": "Cantidad disponible."
-    })
+        if cant > disp:
+            return jsonify({
+                "valido": False,
+                "mensaje": f"Stock insuficiente para {marca} - {producto}. Disponibles: {disp}"
+            }), 400
 
+    return jsonify({"valido": True})
 
-# =========================================================
-# CREACIÓN DE PEDIDOS
-# =========================================================
 
 @app.post("/api/pedidos")
 def crear_pedido():
-    payload = request.get_json(
-        silent=True
-    ) or {}
+    data = request.get_json(silent=True) or {}
 
-    name = str(
-        payload.get("nombre", "")
-    ).strip()
+    nombre = str(data.get("cliente_nombre", "")).strip()
+    telefono = str(data.get("cliente_telefono", "")).strip()
+    items = data.get("items", [])
 
-    phone = re.sub(
-        r"\D",
-        "",
-        str(payload.get("telefono", ""))
-    )
-
-    lines = payload.get(
-        "productos",
-        []
-    )
-
-    if len(name) < 3:
+    if not nombre or not telefono or not items:
         return jsonify({
             "ok": False,
-            "mensaje": (
-                "Ingresa tu nombre completo."
-            )
-        }), 400
-
-    if not re.fullmatch(r"9\d{8}", phone):
-        return jsonify({
-            "ok": False,
-            "mensaje": (
-                "Ingresa un celular peruano "
-                "válido de 9 dígitos."
-            )
-        }), 400
-
-    if not isinstance(lines, list) or not lines:
-        return jsonify({
-            "ok": False,
-            "mensaje": "La cesta está vacía."
+            "mensaje": "Datos incompletos"
         }), 400
 
     ensure_snapshot()
 
-    prepared = []
-    total = Decimal("0")
+    lines_to_create = []
+    total_pedido = Decimal("0")
 
-    try:
-        for line in lines:
-            quantity = int(
-                line.get("cantidad", 0)
+    for item in items:
+        marca = str(item.get("marca", "")).strip()
+        producto = str(item.get("producto", "")).strip()
+        cant = entero_stock(item.get("cantidad", 1))
+
+        snap = find_snapshot(marca, producto)
+
+        if not snap:
+            return jsonify({
+                "ok": False,
+                "mensaje": f"Producto no disponible: {marca} - {producto}"
+            }), 400
+
+        disp = available_stock(snap)
+
+        if cant > disp:
+            return jsonify({
+                "ok": False,
+                "mensaje": f"No hay stock suficiente de {marca} - {producto}"
+            }), 400
+
+        subtotal = snap.precio * cant
+        total_pedido += subtotal
+
+        lines_to_create.append({
+            "marca": snap.marca,
+            "producto": snap.producto,
+            "quantity": cant,
+            "unit_price": snap.precio,
+            "subtotal": subtotal,
+        })
+
+    code = "PED-" + ahora_lima().strftime("%Y%m%d") + "-" + secrets.token_hex(3).upper()
+
+    order = Order(
+        code=code,
+        customer_name=nombre,
+        customer_phone=telefono,
+        total=total_pedido,
+        status="Pendiente",
+        channel="WhatsApp",
+        created_at=ahora_utc(),
+        updated_at=ahora_utc(),
+    )
+
+    db.session.add(order)
+    db.session.flush()
+
+    for line in lines_to_create:
+        db.session.add(
+            OrderLine(
+                order_id=order.id,
+                marca=line["marca"],
+                producto=line["producto"],
+                quantity=line["quantity"],
+                unit_price=line["unit_price"],
+                subtotal=line["subtotal"],
             )
-
-            if quantity < 1 or quantity > 99:
-                raise ValueError(
-                    "Cantidad inválida"
-                )
-
-            snapshot = find_snapshot(
-                line.get("marca"),
-                line.get("producto")
-            )
-
-            if (
-                snapshot is None
-                or quantity
-                > available_stock(snapshot)
-            ):
-                return jsonify({
-                    "ok": False,
-                    "mensaje": (
-                        "Uno de los productos ya no "
-                        "tiene disponibilidad suficiente."
-                    ),
-                }), 409
-
-            subtotal = (
-                snapshot.precio * quantity
-            )
-
-            total += subtotal
-
-            prepared.append(
-                (
-                    snapshot,
-                    quantity,
-                    subtotal
-                )
-            )
-
-        code = (
-            f"PED-"
-            f"{ahora_lima().strftime('%Y%m%d')}-"
-            f"{secrets.token_hex(3).upper()}"
         )
 
-        current_utc = ahora_utc()
-
-        order = Order(
-            code=code,
-            customer_name=name,
-            customer_phone=phone,
-            total=total,
-            status="Pendiente",
-            channel="WhatsApp",
-            created_at=current_utc,
-            updated_at=current_utc,
-        )
-
-        db.session.add(order)
-        db.session.flush()
-
-        for snapshot, quantity, subtotal in prepared:
-            db.session.add(
-                OrderLine(
-                    order_id=order.id,
-                    marca=snapshot.marca,
-                    producto=snapshot.producto,
-                    quantity=quantity,
-                    unit_price=snapshot.precio,
-                    subtotal=subtotal,
-                )
-            )
-
-        db.session.commit()
-
-    except Exception as error:
-        db.session.rollback()
-
-        app.logger.exception(
-            "No se pudo crear el pedido: %s",
-            error
-        )
-
-        return jsonify({
-            "ok": False,
-            "mensaje": (
-                "No se pudo registrar el pedido."
-            )
-        }), 500
+    db.session.commit()
 
     return jsonify({
         "ok": True,
         "codigo": order.code,
-        "estado": order.status,
-        "total": float(order.total),
-        "fecha_peru": filtro_hora_peru(
-            order.created_at
-        ),
-    }), 201
+        "total": float(order.total)
+    })
 
 
 # =========================================================
-# ACCESO ADMINISTRATIVO
+# RUTAS DE ADMINISTRACIÓN
 # =========================================================
 
 @app.get("/admin/login")
@@ -1044,7 +808,7 @@ def admin_logout():
 
 
 # =========================================================
-# PANEL DE PEDIDOS
+# PANEL DE PEDIDOS Y GESTIÓN DE STOCK
 # =========================================================
 
 @app.get("/admin/pedidos")
@@ -1062,6 +826,104 @@ def admin_orders():
         "admin_orders.html",
         orders=orders
     )
+
+
+# =========================================================
+# GESTIÓN DE VENTAS Y ENTRADAS EN EXCEL Y STOCK REAL
+# =========================================================
+
+def registrar_venta_excel(order):
+    excel_path = Path("Productos_Julio.xlsx")
+    
+    if excel_path.exists():
+        workbook = load_workbook(excel_path)
+    else:
+        workbook = Workbook()
+
+    if "Ventas" in workbook.sheetnames:
+        worksheet = workbook["Ventas"]
+    else:
+        worksheet = workbook.create_sheet("Ventas")
+        worksheet.append([
+            "Fecha Perú", "Código Pedido", "Marca", "Producto",
+            "Cantidad", "Precio Unitario", "Subtotal", "Cliente"
+        ])
+
+    created_peru = convertir_a_hora_peru(order.created_at)
+    fecha_str = created_peru.strftime("%d/%m/%Y %I:%M %p") if created_peru else ""
+    cliente_str = f"{order.customer_name} ({order.customer_phone})"
+
+    for line in order.lines:
+        worksheet.append([
+            fecha_str,
+            order.code,
+            line.marca,
+            line.producto,
+            line.quantity,
+            float(line.unit_price),
+            float(line.subtotal),
+            cliente_str
+        ])
+
+    workbook.save(excel_path)
+
+
+@app.get("/admin/stock")
+@admin_required
+def admin_stock():
+    date_used = snapshot_date_in_use()
+    snapshots = (
+        StockSnapshot.query
+        .filter_by(snapshot_date=date_used)
+        .order_by(StockSnapshot.marca.asc(), StockSnapshot.producto.asc())
+        .all()
+    ) if date_used else []
+
+    reservas = reserved_quantities()
+    reporte = []
+
+    for item in snapshots:
+        key = (normalizar(item.marca), normalizar(item.producto))
+        cant_reservada = reservas.get(key, 0)
+        disponible_real = max(0, item.stock - cant_reservada)
+
+        reporte.append({
+            "marca": item.marca,
+            "producto": item.producto,
+            "stock_base": item.stock,
+            "reservado": cant_reservada,
+            "disponible_real": disponible_real
+        })
+
+    return render_template("admin_stock.html", reporte=reporte)
+
+
+@app.post("/admin/entradas/guardar")
+@admin_required
+def registrar_entrada():
+    marca = request.form.get("marca", "").strip()
+    producto = request.form.get("producto", "").strip()
+    cantidad = entero_stock(request.form.get("cantidad", 0))
+    nota = request.form.get("nota", "").strip()
+
+    if marca and producto and cantidad > 0:
+        excel_path = Path("Productos_Julio.xlsx")
+        workbook = load_workbook(excel_path) if excel_path.exists() else Workbook()
+        worksheet = workbook["Entradas"] if "Entradas" in workbook.sheetnames else workbook.create_sheet("Entradas")
+
+        if worksheet.max_row == 1 and worksheet.cell(1, 1).value is None:
+            worksheet.append(["Fecha Perú", "Marca", "Producto", "Cantidad Ingresada", "Nota / Proveedor"])
+
+        worksheet.append([
+            ahora_lima().strftime("%d/%m/%Y %I:%M %p"),
+            marca,
+            producto,
+            cantidad,
+            nota
+        ])
+        workbook.save(excel_path)
+
+    return redirect(url_for("admin_stock"))
 
 
 @app.post(
@@ -1099,6 +961,9 @@ def update_order_status(order_id):
             "ok": False,
             "mensaje": "Estado inválido"
         }), 400
+
+    if new_status == "Confirmado" and order.status != "Confirmado":
+        registrar_venta_excel(order)
 
     order.status = new_status
     order.updated_at = ahora_utc()
