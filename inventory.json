@@ -1,26 +1,21 @@
 [
   {
-    "id": "PROD-001",
-    "nombre": "Zapatillas Urbanas Classic",
-    "descripcion": "Zapatillas cómodas para uso diario, material sintético de alta resistencia.",
-    "precio": 129.90,
-    "stock": 25,
-    "imagen": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500"
-  },
-  {
-    "id": "PROD-002",
-    "nombre": "Mochila Ergonomica Ejecutiva",
-    "descripcion": "Mochila con compartimento para laptop de hasta 15.6 pulgadas y puerto USB.",
-    "precio": 89.90,
-    "stock": 15,
-    "imagen": "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=500"
-  },
-  {
-    "id": "PROD-003",
-    "nombre": "Audífonos Inalámbricos Bluetooth",
-    "descripcion": "Cancelación activa de ruido, autonomía de hasta 24 horas con estuche de carga.",
-    "precio": 159.00,
+    "id": "1",
+    "nombre": "Nombre de tu Producto 1",
+    "descripcion": "Descripción detallada del producto",
+    "precio": 50.00,
     "stock": 10,
-    "imagen": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500"
+    "imagenes": [
+      "https://enlace-de-tu-foto-1.jpg",
+      "https://enlace-de-tu-foto-2.jpg"
+    ]
+  },
+  {
+    "id": "2",
+    "nombre": "Nombre de tu Producto 2",
+    "descripcion": "Otra descripción de producto",
+    "precio": 85.50,
+    "stock": 5,
+    "imagen": "https://enlace-de-tu-foto-unica.jpg"
   }
 ]
