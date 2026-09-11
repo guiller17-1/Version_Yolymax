@@ -11,6 +11,10 @@
         </div>
 
         <div class="head-actions">
+            <a href="/admin/stock">
+                Stock y Entradas
+            </a>
+
             <a href="/admin/exportar-pedidos.xlsx">
                 Exportar Excel
             </a>
@@ -128,5 +132,10 @@
                 </article>
 
             {% endfor %}
-{% else %}<div class="empty-admin">Todavía no hay pedidos registrados.</div>{% endif %}
-</main><script src="/static/admin.js"></script></body></html>
+        {% else %}
+            <div class="empty-admin">Todavía no hay pedidos registrados.</div>
+        {% endif %}
+    </main>
+    <script src="/static/admin.js"></script>
+</body>
+</html>
