@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: catalogo-pedidos
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: catalogo-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ONEDRIVE_URL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
+      - key: APP_BASE_URL
+        sync: false
+
+  - type: cron
+    name: captura-stock-diaria
+    runtime: python
+    schedule: "0 11 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python jobs/daily_snapshot.py
+    envVars:
+      - key: APP_BASE_URL
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+
+databases:
+  - name: catalogo-db
+    databaseName: catalogo
+    user: catalogo

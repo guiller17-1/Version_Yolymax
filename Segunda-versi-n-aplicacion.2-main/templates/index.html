@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catálogo y pedidos</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="card">
+    <header>
+      <div>
+        <span class="eyebrow">CATÁLOGO EN LÍNEA</span>
+        <h1>Consulta de disponibilidad</h1>
+        <p>Busca un producto, selecciona la cantidad y agrégalo a tu pedido.</p>
+      </div>
+      <button id="abrir-cesta" class="cart-open" type="button">🛒 Mi pedido <span id="contador-cesta">0</span></button>
+    </header>
+
+    <section class="form">
+      <div class="search-grid">
+        <div>
+          <label for="marca">Marca <small>(opcional)</small></label>
+          <div class="combo"><input id="marca" autocomplete="off" placeholder="Escribe una marca"><div id="marcas" class="options"></div></div>
+        </div>
+        <div>
+          <label for="producto">Producto</label>
+          <div class="combo"><input id="producto" autocomplete="off" placeholder="Escribe un producto"><div id="productos" class="options"></div></div>
+        </div>
+      </div>
+
+      <div id="ficha-producto" class="product hidden">
+        <div class="gallery">
+          <img id="imagen-producto" alt="Imagen del producto">
+          <button id="imagen-anterior" class="arrow left hidden" type="button">‹</button>
+          <button id="imagen-siguiente" class="arrow right hidden" type="button">›</button>
+          <div id="indicadores-imagen" class="dots"></div>
+        </div>
+        <div class="details">
+          <div class="product-info">
+            <h2 id="nombre-producto"></h2>
+            <p id="marca-producto" class="brand"></p>
+            <p id="precio" class="price"></p>
+          </div>
+          <div id="resultado" class="status"><strong id="estado"></strong><p id="mensaje-estado"></p></div>
+          <div id="seccion-cantidad" class="quantity-section">
+            <div><strong>Cantidad</strong><small>El stock exacto no se muestra.</small></div>
+            <div class="quantity"><button id="disminuir-cantidad" type="button">−</button><input id="cantidad-producto" type="number" value="1" min="1" max="99"><button id="aumentar-cantidad" type="button">+</button></div>
+          </div>
+          <p id="mensaje-pedido" class="message hidden"></p>
+          <button id="agregar-pedido" class="add" type="button">Agregar al pedido</button>
+        </div>
+      </div>
+
+      <button id="limpiar" class="clear" type="button">Limpiar consulta</button>
+      <p id="nota" class="note">Cargando inventario...</p>
+    </section>
+  </main>
+
+  <div id="fondo-cesta" class="overlay hidden"></div>
+  <aside id="panel-cesta" class="cart" aria-hidden="true">
+    <div class="cart-head"><div><span class="eyebrow">RESUMEN</span><h2>Mi pedido</h2></div><button id="cerrar-cesta" type="button">×</button></div>
+    <div id="lista-cesta" class="cart-list"></div>
+    <div id="cesta-vacia" class="empty"><span>🛒</span><h3>Tu pedido está vacío</h3><p>Agrega productos para comenzar.</p></div>
+    <div id="resumen-cesta" class="cart-summary hidden">
+      <div class="total"><span>Total del pedido</span><strong id="total-cesta">S/ 0.00</strong></div>
+      <p id="mensaje-cesta" class="message hidden"></p>
+      <button id="enviar-whatsapp" class="whatsapp" type="button">Continuar y enviar por WhatsApp</button>
+      <button id="vaciar-cesta" class="clear" type="button">Vaciar pedido</button>
+    </div>
+  </aside>
+
+  <div id="modal-cliente" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="titulo-cliente">
+    <form id="form-cliente" class="modal-card">
+      <button id="cerrar-modal" class="modal-close" type="button">×</button>
+      <span class="eyebrow dark">DATOS DEL PEDIDO</span>
+      <h2 id="titulo-cliente">Antes de continuar</h2>
+      <p>Ingresa tus datos para registrar la reserva antes de abrir WhatsApp.</p>
+      <label for="cliente-nombre">Nombre completo</label>
+      <input id="cliente-nombre" maxlength="160" autocomplete="name" required>
+      <label for="cliente-telefono">Número de celular</label>
+      <input id="cliente-telefono" type="tel" inputmode="numeric" maxlength="9" placeholder="9XXXXXXXX" required>
+      <p id="mensaje-cliente" class="message hidden"></p>
+      <button id="confirmar-pedido" class="whatsapp" type="submit">Registrar y abrir WhatsApp</button>
+    </form>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

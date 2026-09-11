@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administrar pedidos</title><link rel="stylesheet" href="/static/admin.css"></head>
+<body>
+    <header class="admin-head">
+        <div>
+            <span class="eyebrow">
+                ADMINISTRACIÓN
+            </span>
+
+            <h1>Pedidos</h1>
+        </div>
+
+        <div class="head-actions">
+            <a href="/admin/exportar-pedidos.xlsx">
+                Exportar Excel
+            </a>
+
+            <form method="post" action="/admin/logout">
+                <button type="submit">
+                    Salir
+                </button>
+            </form>
+        </div>
+    </header>
+
+    <main class="admin-main">
+        {% if orders %}
+
+            {% for order in orders %}
+
+                <article
+                    class="order-card"
+                    data-order-id="{{ order.id }}"
+                >
+                    <div class="order-top">
+                        <div>
+                            <h2>
+                                {{ order.code }}
+                            </h2>
+
+                            <p>
+                                {{ order.customer_name }}
+                                ·
+                                {{ order.customer_phone }}
+                            </p>
+                        </div>
+
+                        <span
+                            class="badge {{ order.status | lower }}"
+                        >
+                            {{ order.status }}
+                        </span>
+                    </div>
+
+                    <p class="date">
+                        Registrado:
+                        {{ order.created_at | hora_peru }}
+                        · Hora de Perú
+                    </p>
+
+                    {% if order.updated_at %}
+                        <p class="date">
+                            Última actualización:
+                            {{ order.updated_at | hora_peru }}
+                            · Hora de Perú
+                        </p>
+                    {% endif %}
+
+                    <div class="lines">
+                        {% for line in order.lines %}
+
+                            <div>
+                                <span>
+                                    {{ line.quantity }}
+                                    ×
+                                    {{ line.marca }}
+                                    ·
+                                    {{ line.producto }}
+                                </span>
+
+                                <strong>
+                                    S/
+                                    {{ "%.2f" | format(line.subtotal) }}
+                                </strong>
+                            </div>
+
+                        {% endfor %}
+                    </div>
+
+                    <div class="order-bottom">
+                        <strong>
+                            Total: S/
+                            {{ "%.2f" | format(order.total) }}
+                        </strong>
+
+                        <div>
+                            <button
+                                class="status-btn confirm"
+                                data-status="Confirmado"
+                                type="button"
+                                {% if order.status == "Confirmado" %}
+                                    disabled
+                                {% endif %}
+                            >
+                                {% if order.status == "Confirmado" %}
+                                    Confirmado
+                                {% else %}
+                                    Confirmar
+                                {% endif %}
+                            </button>
+
+                            <button
+                                class="status-btn reject"
+                                data-status="Rechazado"
+                                type="button"
+                                {% if order.status == "Rechazado" %}
+                                    disabled
+                                {% endif %}
+                            >
+                                {% if order.status == "Rechazado" %}
+                                    Rechazado
+                                {% else %}
+                                    Rechazar
+                                {% endif %}
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+            {% endfor %}
+{% else %}<div class="empty-admin">Todavía no hay pedidos registrados.</div>{% endif %}
+</main><script src="/static/admin.js"></script></body></html>
