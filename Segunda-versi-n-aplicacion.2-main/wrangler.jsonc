@@ -1,9 +1,27 @@
 {
-  "name": "yolymax",
+  "name": "yolymax1",
   "main": "src/index.js",
   "compatibility_date": "2026-11-25",
-  "assets": {"directory": "./public", "binding": "ASSETS", "run_worker_first": true},
-  "d1_databases": [{"binding": "DB", "database_name": "yolymax-db", "database_id": "REEMPLAZAR_CON_DATABASE_ID", "migrations_dir": "migrations"}],
-  "r2_buckets": [{"binding": "IMAGES", "bucket_name": "yolymax-imagenes"}],
-  "observability": {"enabled": true}
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yolymax1-db",
+      "database_id": "cdb08d58-5c79-47a5-8912-bfb118d93575",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      "bucket_name": "yolymax1-imagenes"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
 }
