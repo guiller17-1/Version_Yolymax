@@ -1,1 +1,16 @@
-{"name":"yolymax-v1","version":"1.0.0","private":true,"type":"module","scripts":{"dev":"wrangler dev","deploy":"wrangler deploy","db:local":"wrangler d1 migrations apply yolymax-db --local","db:remote":"wrangler d1 migrations apply yolymax-db --remote","test":"node --experimental-sqlite --test tests/*.test.mjs"},"devDependencies":{"wrangler":"^4.0.0"}}
+{
+  "name": "yolymax-v1",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 migrations apply yolymax1-db --local",
+    "db:remote": "wrangler d1 migrations apply yolymax1-db --remote",
+    "test": "node --experimental-sqlite --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
