@@ -1,0 +1,24 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync} from 'node:fs';
+import worker from '../src/index.js';
+const db=new DatabaseSync(':memory:');for(const f of ['0001_schema.sql','0002_seed.sql'])db.exec(readFileSync(new URL('../migrations/'+f,import.meta.url),'utf8'));
+class Stmt {constructor(sql,args=[]){this.sql=sql;this.args=args}bind(...a){return new Stmt(this.sql,a)}first(){return Promise.resolve(db.prepare(this.sql).get(...this.args))}all(){return Promise.resolve({results:db.prepare(this.sql).all(...this.args)})}run(){return Promise.resolve(db.prepare(this.sql).run(...this.args))}}
+const env={DB:{prepare:s=>new Stmt(s),async batch(stmts){db.exec('BEGIN');try{const rs=stmts.map(s=>/^SELECT/i.test(s.sql)?{results:db.prepare(s.sql).all(...s.args)}:db.prepare(s.sql).run(...s.args));db.exec('COMMIT');return rs}catch(e){db.exec('ROLLBACK');throw e}}},ADMIN_PASSWORD:'local-test-unique-password-123',IMAGES:{async put(){}}};
+const root='https://test.yolymax.example';let token='';
+async function call(path,method='GET',body,auth=false){const req=new Request(root+path,{method,headers:{Origin:root,'Content-Type':'application/json',...(auth?{Cookie:token}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});const r=await worker.fetch(req,env);return {status:r.status,data:await r.json(),headers:r.headers}}
+async function save(snapshot){const a=await call('/api/admin/state','PUT',snapshot,true);assert.equal(a.status,200,JSON.stringify(a.data));return a.data}
+async function load(){return (await call('/api/admin/state','GET',undefined,true)).data}
+const move=(s,p,delta,reason)=>{p.stock+=delta;s.moves.unshift({id:crypto.randomUUID(),productId:p.id,name:p.name,delta,stock:p.stock,reason,date:new Date().toISOString()})};
+test('flujo comercial, privacidad y control de concurrencia',async()=>{
+ let r=await call('/api/catalog');assert.equal(r.status,200);assert.equal(r.data.products.length,5);assert.equal(r.data.products[0].available,false);assert.equal('stock' in r.data.products[0],false);assert.equal('cost' in r.data.products[0],false);assert.equal((await call('/api/admin/state')).status,401);assert.equal((await call('/api/admin/state','PUT',{})).status,401);assert.equal((await call('/api/login','POST',{password:'wrong'})).status,401);
+ r=await call('/api/login','POST',{password:env.ADMIN_PASSWORD});assert.equal(r.status,200);token=r.headers.get('Set-Cookie').split(';')[0];assert.match(r.headers.get('Set-Cookie'),/HttpOnly/);
+ let a=await load();assert.equal(a.state.products.length,5);let p=a.state.products.find(p=>p.id==='satin-rouge');p.cost=20;move(a.state,p,8,'Compra C-0001');a.state.purchases.unshift({id:crypto.randomUUID(),code:'C-0001',date:new Date().toISOString(),supplier:'Proveedor',items:[{id:p.id,name:p.name,qty:8,price:20,cost:20,total:160}],total:160});const stale=structuredClone(a);await save(a);assert.equal((await call('/api/admin/state','PUT',stale,true)).status,409);
+ r=await call('/api/catalog');assert.equal(r.data.products.find(x=>x.id===p.id).available,true);assert.equal('cost' in r.data.products.find(x=>x.id===p.id),false);
+ const items=[{id:p.id,qty:2}];r=await call('/api/ops/quote','POST',{items});assert.equal(r.status,200);assert.equal(r.data.total,78);assert.equal('cost' in r.data.items[0],false);assert.equal((await call('/api/ops/quote','POST',{items:[{id:p.id,qty:9}]})).status,409);
+ const payload={items,key:crypto.randomUUID(),name:'Prueba',phone:'999999999',shipping:'Recojo coordinado',payment:'Efectivo',expectedTotal:78};assert.equal((await call('/api/ops/orders','POST',{...payload,expectedTotal:1})).status,409);r=await call('/api/ops/orders','POST',payload);assert.equal(r.status,201,JSON.stringify(r.data));const order=r.data;assert.equal('cost' in order.items[0],false);const duplicate=await call('/api/ops/orders','POST',payload);assert.equal(duplicate.data.id,order.id);
+ a=await load();p=a.state.products.find(p=>p.id==='satin-rouge');assert.equal(p.stock,8);let o=a.state.orders[0];o.status='Confirmado';o.reserved=true;move(a.state,p,-2,'Reserva '+o.code);await save(a);
+ a=await load();p=a.state.products.find(p=>p.id==='satin-rouge');assert.equal(p.stock,6);o=a.state.orders[0];o.status='Entregado';a.state.sales.unshift({id:crypto.randomUUID(),code:'V-0001',date:new Date().toISOString(),orderId:o.id,orderCode:o.code,items:o.items,total:o.total});await save(a);a=await load();assert.equal(a.state.products.find(p=>p.id==='satin-rouge').stock,6);assert.equal(a.state.sales.length,1);
+ a.state.sales[0].total=1;assert.equal((await call('/api/admin/state','PUT',a,true)).status,400);assert.equal((await call('/api/logout','POST',{},true)).status,200);assert.equal((await call('/api/admin/state','GET',undefined,true)).status,401);
+});
