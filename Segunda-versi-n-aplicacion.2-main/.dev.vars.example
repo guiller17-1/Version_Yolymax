@@ -1,2 +1,2 @@
-# Copiar a .dev.vars solamente para pruebas locales. Nunca publicar la contraseña.
-ADMIN_PASSWORD=REEMPLAZAR_POR_CONTRASENA_LARGA_Y_UNICA
+# Solo pruebas locales. Nunca subir .dev.vars real.
+ADMIN_RECOVERY_KEY=REEMPLAZAR_CON_CLAVE_ALEATORIA_DE_32_O_MAS_CARACTERES
