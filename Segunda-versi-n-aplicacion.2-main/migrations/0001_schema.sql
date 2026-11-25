@@ -1,0 +1,13 @@
+CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL CHECK(version>=0));
+INSERT INTO revision VALUES(1,0);
+CREATE TABLE business_settings(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL CHECK(json_valid(data)));
+CREATE TABLE products(id TEXT PRIMARY KEY, sku TEXT NOT NULL COLLATE NOCASE UNIQUE, stock INTEGER NOT NULL CHECK(stock>=0), published INTEGER NOT NULL CHECK(published IN(0,1)), data TEXT NOT NULL CHECK(json_valid(data)));
+CREATE TABLE orders(id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, request_key TEXT NOT NULL UNIQUE, data TEXT NOT NULL CHECK(json_valid(data)));
+CREATE TABLE purchases(id TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)));
+CREATE TABLE sales(id TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)));
+CREATE TABLE moves(id TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)));
+CREATE TABLE sessions(token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+CREATE TABLE throttle(bucket TEXT PRIMARY KEY, window INTEGER NOT NULL, attempts INTEGER NOT NULL);
+CREATE INDEX orders_date ON orders(json_extract(data,'$.date'));
+CREATE INDEX sales_date ON sales(json_extract(data,'$.date'));
+CREATE INDEX purchases_date ON purchases(json_extract(data,'$.date'));
