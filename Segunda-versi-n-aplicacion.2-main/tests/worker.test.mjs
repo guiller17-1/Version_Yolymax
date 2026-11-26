@@ -3,17 +3,17 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import worker from '../src/index.js';
-const db=new DatabaseSync(':memory:');for(const f of ['0001_schema.sql','0002_seed.sql','0003_admin_users.sql'])db.exec(readFileSync(new URL('../migrations/'+f,import.meta.url),'utf8'));
+const db=new DatabaseSync(':memory:');for(const f of ['0001_schema.sql','0002_seed.sql','0003_admin_users.sql','0004_customer_accounts.sql'])db.exec(readFileSync(new URL('../migrations/'+f,import.meta.url),'utf8'));
 class Stmt {constructor(sql,args=[]){this.sql=sql;this.args=args}bind(...a){return new Stmt(this.sql,a)}first(){return Promise.resolve(db.prepare(this.sql).get(...this.args))}all(){return Promise.resolve({results:db.prepare(this.sql).all(...this.args)})}run(){return Promise.resolve(db.prepare(this.sql).run(...this.args))}}
 const env={DB:{prepare:s=>new Stmt(s),async batch(stmts){db.exec('BEGIN');try{const rs=stmts.map(s=>/^SELECT/i.test(s.sql)?{results:db.prepare(s.sql).all(...s.args)}:db.prepare(s.sql).run(...s.args));db.exec('COMMIT');return rs}catch(e){db.exec('ROLLBACK');throw e}}},ADMIN_RECOVERY_KEY:'local-test-recovery-only-32-characters-1234567890',IMAGES:{async put(){}}};
-const root='https://test.yolymax.example';let token='';const ownerEmail='owner@example.test',ownerPassword='local-test-owner-password-123';
+const root='https://test.yolymax.example';let token='';const ownerEmail='owner@example.test',ownerPassword='Local-test-owner-password-123';
 async function call(path,method='GET',body,auth=false){const req=new Request(root+path,{method,headers:{Origin:root,'Content-Type':'application/json',...(auth?{Cookie:token}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});const r=await worker.fetch(req,env);return {status:r.status,data:await r.json(),headers:r.headers}}
 async function save(snapshot){const a=await call('/api/admin/state','PUT',snapshot,true);assert.equal(a.status,200,JSON.stringify(a.data));return a.data}
 async function load(){return (await call('/api/admin/state','GET',undefined,true)).data}
 const move=(s,p,delta,reason)=>{p.stock+=delta;s.moves.unshift({id:crypto.randomUUID(),productId:p.id,name:p.name,delta,stock:p.stock,reason,date:new Date().toISOString()})};
 test('flujo comercial, privacidad y control de concurrencia',async()=>{
  let r=await call('/api/catalog');assert.equal(r.status,200);assert.equal(r.data.products.length,5);assert.equal(r.data.products[0].available,false);assert.equal('stock' in r.data.products[0],false);assert.equal('cost' in r.data.products[0],false);assert.equal((await call('/api/admin/state')).status,401);assert.equal((await call('/api/admin/state','PUT',{})).status,401);assert.equal((await call('/api/login','POST',{email:ownerEmail,password:'wrong'})).status,401);
- assert.equal((await call('/api/auth/setup','POST',{name:'Owner',email:ownerEmail,password:ownerPassword,key:env.ADMIN_RECOVERY_KEY})).status,201);r=await call('/api/login','POST',{email:ownerEmail,password:ownerPassword});assert.equal(r.status,200);token=r.headers.get('Set-Cookie').split(';')[0];assert.match(r.headers.get('Set-Cookie'),/HttpOnly/);
+ assert.equal((await call('/api/auth/setup','POST',{name:'Owner',email:ownerEmail,username:'owner123',password:ownerPassword,key:env.ADMIN_RECOVERY_KEY})).status,201);r=await call('/api/login','POST',{email:ownerEmail,password:ownerPassword});assert.equal(r.status,200);token=r.headers.get('Set-Cookie').split(';')[0];assert.match(r.headers.get('Set-Cookie'),/HttpOnly/);
  let a=await load();assert.equal(a.state.products.length,5);let p=a.state.products.find(p=>p.id==='satin-rouge');p.cost=20;move(a.state,p,8,'Compra C-0001');a.state.purchases.unshift({id:crypto.randomUUID(),code:'C-0001',date:new Date().toISOString(),supplier:'Proveedor',items:[{id:p.id,name:p.name,qty:8,price:20,cost:20,total:160}],total:160});const stale=structuredClone(a);await save(a);assert.equal((await call('/api/admin/state','PUT',stale,true)).status,409);
  r=await call('/api/catalog');assert.equal(r.data.products.find(x=>x.id===p.id).available,true);assert.equal('cost' in r.data.products.find(x=>x.id===p.id),false);
  const items=[{id:p.id,qty:2}];r=await call('/api/ops/quote','POST',{items});assert.equal(r.status,200);assert.equal(r.data.total,78);assert.equal('cost' in r.data.items[0],false);assert.equal((await call('/api/ops/quote','POST',{items:[{id:p.id,qty:9}]})).status,409);
@@ -31,12 +31,36 @@ test('cuentas individuales, permisos, recuperación y revocación',async()=>{
  const login=async(email,password)=>{const r=await call('/api/login','POST',{email,password});assert.equal(r.status,200,JSON.stringify(r.data));token=r.headers.get('Set-Cookie').split(';')[0];};
  await login(ownerEmail,ownerPassword);const ownerToken=token;
  assert.equal((await call('/api/auth/setup','POST',{name:'Second',email:'second@example.test',password:ownerPassword,key:env.ADMIN_RECOVERY_KEY})).status,409);
- const a=await call('/api/auth/users','POST',{name:'Admin',email:'admin@example.test',password:'admin-test-password-long'},true);assert.equal(a.status,201);
+ const a=await call('/api/auth/users','POST',{name:'Admin',email:'admin@example.test',username:'admin123',password:'Admin123'},true);assert.equal(a.status,201);
  const list=await call('/api/auth/users','GET',undefined,true);const admin=list.data.users.find(x=>x.role==='admin');assert.ok(admin);assert.equal('password_hash' in admin,false);assert.equal('salt' in admin,false);
- await login(admin.email,'admin-test-password-long');const adminToken=token;assert.equal((await call('/api/admin/state','GET',undefined,true)).status,200);assert.equal((await call('/api/auth/users','GET',undefined,true)).status,403);
- token=ownerToken;assert.equal((await call('/api/auth/users/reset','POST',{id:admin.id,password:'new-admin-password-long'},true)).status,200);token=adminToken;assert.equal((await call('/api/admin/state','GET',undefined,true)).status,401);
- await login(admin.email,'new-admin-password-long');const secondToken=token;token=ownerToken;assert.equal((await call('/api/auth/users/active','POST',{id:admin.id,active:false},true)).status,200);token=secondToken;assert.equal((await call('/api/admin/state','GET',undefined,true)).status,401);
- assert.equal((await call('/api/auth/recover','POST',{email:ownerEmail,key:env.ADMIN_RECOVERY_KEY,password:'recovered-owner-password-long'})).status,200);token=ownerToken;assert.equal((await call('/api/admin/state','GET',undefined,true)).status,401);
- await login(ownerEmail,'recovered-owner-password-long');assert.equal((await call('/api/auth/me','GET',undefined,true)).data.user.role,'owner');
- assert.equal((await call('/api/auth/password','POST',{current:'recovered-owner-password-long',password:'changed-owner-password-long'},true)).status,200);assert.equal((await call('/api/admin/state','GET',undefined,true)).status,401);
+ await login(admin.email,'Admin123');const adminToken=token;assert.equal((await call('/api/admin/state','GET',undefined,true)).status,200);assert.equal((await call('/api/auth/users','GET',undefined,true)).status,403);
+ token=ownerToken;assert.equal((await call('/api/auth/users/reset','POST',{id:admin.id,password:'Newadmin123'},true)).status,200);token=adminToken;assert.equal((await call('/api/admin/state','GET',undefined,true)).status,401);
+ await login(admin.email,'Newadmin123');const secondToken=token;token=ownerToken;assert.equal((await call('/api/auth/users/active','POST',{id:admin.id,active:false},true)).status,200);token=secondToken;assert.equal((await call('/api/admin/state','GET',undefined,true)).status,401);
+ assert.equal((await call('/api/auth/recover','POST',{email:ownerEmail,key:env.ADMIN_RECOVERY_KEY,password:'Recovered123'})).status,200);token=ownerToken;assert.equal((await call('/api/admin/state','GET',undefined,true)).status,401);
+ await login(ownerEmail,'Recovered123');assert.equal((await call('/api/auth/me','GET',undefined,true)).data.user.role,'owner');
+ assert.equal((await call('/api/auth/password','POST',{current:'Recovered123',password:'Changed123'},true)).status,200);assert.equal((await call('/api/admin/state','GET',undefined,true)).status,401);
+});
+
+
+test('clientes: registro único, aislamiento, pedidos y cambio de contraseña',async()=>{
+ const reg={name:'Cliente prueba',phone:'999999999',email:'cliente@example.test',username:'cliente01',password:'Cliente1',consent:true};
+ assert.equal((await call('/api/customer/register','POST',{...reg,password:'abcdef12'})).status,400);
+ let r=await call('/api/customer/register','POST',reg);assert.equal(r.status,200,JSON.stringify(r.data));let ct=r.headers.get('Set-Cookie').split(';')[0];
+ assert.equal((await call('/api/customer/register','POST',{...reg,email:'otro@example.test',username:'CLIENTE01'})).status,409);
+ assert.equal((await call('/api/customer/register','POST',{...reg,email:ownerEmail,username:'other123'})).status,409);
+ assert.equal((await call('/api/customer/register','POST',{...reg,email:'CLIENTE@EXAMPLE.TEST',username:'other123'})).status,409);
+ r=await call('/api/customer/login','POST',{identifier:'CLIENTE01',password:'Cliente1'});assert.equal(r.status,200);ct=r.headers.get('Set-Cookie').split(';')[0];
+ token=ct;assert.equal((await call('/api/customer/me','GET',undefined,true)).data.account.username,'cliente01');assert.equal((await call('/api/admin/state','GET',undefined,true)).status,401);
+ assert.equal((await call('/api/customer/orders','GET',undefined,true)).data.orders.length,0);
+ r=await call('/api/ops/orders','POST',{items:[{id:'satin-rouge',qty:1}],key:crypto.randomUUID(),name:'Cliente prueba',phone:'999999999',shipping:'Recojo coordinado',payment:'Efectivo',expectedTotal:39},true);assert.equal(r.status,201,JSON.stringify(r.data));
+ const orders=await call('/api/customer/orders','GET',undefined,true);assert.equal(orders.data.orders.length,1);assert.equal('cost' in orders.data.orders[0].items[0],false);
+ db.exec("DELETE FROM throttle WHERE bucket LIKE 'customer-register:%'"); // Simulate next registration window.
+ r=await call('/api/customer/register','POST',{...reg,email:'other@example.test',username:'other123'});assert.equal(r.status,200,JSON.stringify(r.data));token=r.headers.get('Set-Cookie').split(';')[0];assert.equal((await call('/api/customer/orders','GET',undefined,true)).data.orders.length,0);
+ token=ct;assert.equal((await call('/api/account/favorites','POST',{productId:'satin-rouge',active:true},true)).status,200);assert.equal((await call('/api/account/cart','POST',{items:{'satin-rouge':2},version:0},true)).status,200);
+ assert.equal((await call('/api/customer/password','POST',{current:'Cliente1',password:'Cliente2'},true)).status,200);assert.equal((await call('/api/customer/me','GET',undefined,true)).status,401);
+ r=await call('/api/login','POST',{identifier:'owner123',password:'Changed123'});assert.equal(r.status,200,JSON.stringify(r.data));token=r.headers.get('Set-Cookie').split(';')[0];assert.equal((await call('/api/admin/customers','GET',undefined,true)).data.customers.length,2);
+ assert.equal((await call('/api/auth/users','POST',{name:'Test',email:'third@example.test',username:'cliente01',password:'Admin123'},true)).status,409);
+ db.prepare("UPDATE admin_users SET username=NULL WHERE role='owner'").run();
+ assert.equal((await call('/api/auth/username','POST',{username:'cliente01',current:'Changed123'},true)).status,409);
+ assert.equal((await call('/api/auth/username','POST',{username:'propietario01',current:'Changed123'},true)).status,200);
 });
